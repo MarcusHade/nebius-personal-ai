@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+openai
+chromadb
+mcp>=1.9,<2
+pydantic-settings
+google-api-python-client
+google-auth-oauthlib
+pytest
+pytest-asyncio
+httpx
