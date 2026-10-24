@@ -53,7 +53,7 @@ class FakeLLM:
         self.calls = 0
         self.seen_system = []
 
-    async def chat(self, messages, tools=None):
+    async def chat(self, messages, tools=None, tool_choice="auto"):
         self.calls += 1
         self.seen_system.append(messages[0]["content"])
         if messages[-1]["role"] == "tool":
@@ -107,6 +107,42 @@ async def test_agent_tool_loop_and_memory(settings, memory):
         assert "Invoice 42" in llm.seen_system[-1]
     finally:
         await b.stop()
+
+
+class FailingBridge:
+    tools = [{"type": "function", "function": {"name": "search_emails", "description": "", "parameters": {"type": "object", "properties": {}}}}]
+
+    def __init__(self):
+        self.calls = 0
+
+    async def call(self, name, args):
+        self.calls += 1
+        return "ERROR: token missing"
+
+
+class StubbornLLM:
+    """Keeps calling the tool unless told tool_choice='none'. This is the real-world failure we hit."""
+
+    model = "stubborn"
+
+    def __init__(self):
+        self.n = 0
+
+    async def chat(self, messages, tools=None, tool_choice="auto"):
+        self.n += 1
+        if tool_choice == "none":
+            return NS(content="Gmail isn't connected.", tool_calls=None)
+        return NS(content=None, tool_calls=[NS(id=f"c{self.n}", function=NS(name="search_emails", arguments="{}"))])
+
+
+@pytest.mark.asyncio
+async def test_tool_error_stops_retry_and_is_not_remembered(settings, memory):
+    bridge = FailingBridge()
+    agent = Agent(StubbornLLM(), bridge, memory, settings)
+    r = await agent.run("what is my latest email?", [])
+    assert bridge.calls == 1  # no retry loop
+    assert r.answer == "Gmail isn't connected."
+    assert memory.count() == 0  # failed-tool answers must not pollute memory
 
 
 def test_snippet_does_not_clobber_full_body(memory):
